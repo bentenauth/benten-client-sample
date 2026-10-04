@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>BentenSampleClient</AssemblyName>
+    <RootNamespace>BentenSampleClient</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <BentenSdkProject>..\..\benten-sdk\Benten.SDK\Benten.SDK.csproj</BentenSdkProject>
+  </PropertyGroup>
+
+  <!-- Use the local SDK source when it sits next to this sample (development);
+       otherwise use the published NuGet package. -->
+  <ItemGroup Condition="Exists('$(BentenSdkProject)')">
+    <ProjectReference Include="$(BentenSdkProject)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('$(BentenSdkProject)')">
+    <PackageReference Include="Benten.SDK" Version="1.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>
