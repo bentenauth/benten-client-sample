@@ -17,6 +17,10 @@ namespace BentenSampleClient;
 /// Fill in the fields at the top of the form, select a test type,
 /// and click Run to send a request to the Benten API.
 ///
+/// The API key comes from the BENTEN_API_KEY environment variable if it is
+/// set, so you don't have to paste it each time. In a real application, keep
+/// the key in your server's configuration or a secret store.
+///
 /// The user identified by the phone number will receive a push notification
 /// on their Benten App and can tap Allow or Deny. The result appears in the
 /// output log below.
@@ -25,9 +29,7 @@ public class SampleWindow : Form
 {
     // ── Controls ──────────────────────────────────────────────────────────────
     private TextBox txtServerUrl      = new() { Width = 400 };
-    private TextBox txtTokenUrl       = new() { Width = 400 };
-    private TextBox txtUsername       = new() { Width = 200 };
-    private TextBox txtPassword       = new() { Width = 200, UseSystemPasswordChar = true };
+    private TextBox txtApiKey         = new() { Width = 400, UseSystemPasswordChar = true };
     private TextBox txtCountry        = new() { Width = 200 };
     private TextBox txtPhoneNumber    = new() { Width = 150 };
     private ComboBox cmbTestType      = new() { Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -35,6 +37,10 @@ public class SampleWindow : Form
     private Button btnClear           = new() { Text = "Clear", Width = 80, Height = 30 };
     private TextBox txtOutput         = new() { Multiline = true, ScrollBars = ScrollBars.Vertical,
                                                  Width = 700, Height = 300, ReadOnly = true, Font = new Font("Consolas", 9) };
+
+    // Reused between runs, so the access token obtained with the API key is reused too.
+    private BentenClient? _client;
+    private string _clientKey = string.Empty;
 
     public SampleWindow()
     {
@@ -45,9 +51,7 @@ public class SampleWindow : Form
 
         // ── Defaults ──────────────────────────────────────────────────────
         txtServerUrl.Text  = "wss://api.bententechnologies.com/v2/";
-        txtTokenUrl.Text   = "https://api.bententechnologies.com/v2/auth/token";
-        txtUsername.Text   = "your-benten-username";
-        txtPassword.Text   = "";
+        txtApiKey.Text     = Environment.GetEnvironmentVariable("BENTEN_API_KEY") ?? "";
         txtCountry.Text    = "United States";
         txtPhoneNumber.Text = "6501234567";  // Replace with a registered user's number
 
@@ -56,8 +60,7 @@ public class SampleWindow : Form
             "Login Approval",
             "Credit Card Transaction",
             "IoT Setting Change",
-            "Generic Notification",
-            "Auth Token Request"
+            "Generic Notification"
         });
         cmbTestType.SelectedIndex = 0;
 
@@ -76,9 +79,7 @@ public class SampleWindow : Form
         }
 
         AddRow("WebSocket server URL:", txtServerUrl);
-        AddRow("Token URL:", txtTokenUrl);
-        AddRow("Developer username:", txtUsername);
-        AddRow("Developer password:", txtPassword);
+        AddRow("API key (bnt_sk_…):", txtApiKey);
         AddRow("Country:", txtCountry);
         AddRow("Phone number:", txtPhoneNumber);
         AddRow("Request type:", cmbTestType);
@@ -108,26 +109,32 @@ public class SampleWindow : Form
 
         try
         {
-            var client = new BentenClient(txtServerUrl.Text.Trim());
+            string apiKey    = txtApiKey.Text.Trim();
+            string serverUrl = txtServerUrl.Text.Trim();
+            if (apiKey.Length == 0)
+            {
+                Log("Enter your API key. Create one on the Benten developer dashboard.");
+                return;
+            }
 
-            // Step 1 — Get Bearer token
-            Log("Requesting Bearer token…");
-            string jwt = await client.GetBearerTokenAsync(
-                txtUsername.Text.Trim(),
-                txtPassword.Text.Trim());
-            Log($"Token obtained (first 40 chars): {jwt[..Math.Min(40, jwt.Length)]}…");
+            // One client per API key and server. The SDK exchanges the key for an
+            // access token on the first request and renews it automatically.
+            if (_client == null || _clientKey != apiKey + "|" + serverUrl)
+            {
+                _client    = new BentenClient(apiKey, serverUrl);
+                _clientKey = apiKey + "|" + serverUrl;
+            }
+            var client = _client;
 
             string country = txtCountry.Text.Trim();
             string phone   = txtPhoneNumber.Text.Trim();
 
-            // Step 2 — Run the selected test
             switch (cmbTestType.SelectedIndex)
             {
-                case 0: await RunLoginTest(client, jwt, country, phone);           break;
-                case 1: await RunCCTransactionTest(client, jwt, country, phone);   break;
-                case 2: await RunIoTTest(client, jwt, country, phone);             break;
-                case 3: await RunGenericNotificationTest(client, jwt, country, phone); break;
-                case 4: await RunAuthTokenTest(client, country, phone);            break;
+                case 0: await RunLoginTest(client, country, phone);               break;
+                case 1: await RunCCTransactionTest(client);                       break;
+                case 2: await RunIoTTest(client);                                 break;
+                case 3: await RunGenericNotificationTest(client, country, phone); break;
             }
         }
         catch (BentenException ex)
@@ -146,10 +153,10 @@ public class SampleWindow : Form
         }
     }
 
-    private async Task RunLoginTest(BentenClient client, string jwt, string country, string phone)
+    private async Task RunLoginTest(BentenClient client, string country, string phone)
     {
         Log("Sending login approval request…");
-        var result = await client.RequestLoginApprovalAsync(jwt, new LoginRequest
+        var result = await client.RequestLoginApprovalAsync(new LoginRequest
         {
             Country     = country,
             PhoneNumber = phone,
@@ -159,11 +166,11 @@ public class SampleWindow : Form
         LogResult(result);
     }
 
-    private async Task RunCCTransactionTest(BentenClient client, string jwt, string country, string phone)
+    private async Task RunCCTransactionTest(BentenClient client)
     {
         Log("Sending credit card transaction approval request…");
         // Replace CreditCardId with an ID from a registered Benten credit card
-        var result = await client.RequestCCTransactionApprovalAsync(jwt, new CCTransactionRequest
+        var result = await client.RequestCCTransactionApprovalAsync(new CCTransactionRequest
         {
             CreditCardId = "REPLACE_WITH_BENTEN_CARD_ID",
             Amount       = "$99.99",
@@ -173,23 +180,23 @@ public class SampleWindow : Form
         LogResult(result);
     }
 
-    private async Task RunIoTTest(BentenClient client, string jwt, string country, string phone)
+    private async Task RunIoTTest(BentenClient client)
     {
         Log("Sending IoT setting change approval request…");
-        var result = await client.RequestIoTSettingApprovalAsync(jwt, new IoTSettingRequest
+        var result = await client.RequestIoTSettingApprovalAsync(new IoTSettingRequest
         {
             Name          = "Sample Thermostat",
-            MacAddress    = "AA:BB:CC:DD:EE:01",
+            MacAddress    = "AA:AA:AA:AA:AA:01",
             SettingChange = "Change temperature from 72°F to 68°F"
         });
 
         LogResult(result);
     }
 
-    private async Task RunGenericNotificationTest(BentenClient client, string jwt, string country, string phone)
+    private async Task RunGenericNotificationTest(BentenClient client, string country, string phone)
     {
         Log("Sending generic notification approval request…");
-        var result = await client.RequestGenericNotificationApprovalAsync(jwt, new GenericNotificationRequest
+        var result = await client.RequestGenericNotificationApprovalAsync(new GenericNotificationRequest
         {
             NotificationSubType = "Document Approval",
             Country             = country,
@@ -203,33 +210,6 @@ public class SampleWindow : Form
         });
 
         LogResult(result);
-    }
-
-    private async Task RunAuthTokenTest(BentenClient client, string country, string phone)
-    {
-        Log("Sending auth token request (user must approve on their Benten App)…");
-        var result = await client.RequestAuthTokenAsync(new AuthTokenRequest
-        {
-            Country     = country,
-            PhoneNumber = phone
-        });
-
-        switch (result.Outcome)
-        {
-            case ApprovalOutcome.Approved when result.IsSuccess:
-                Log($"[SUCCESS] Token issued (first 40 chars): {result.Token[..Math.Min(40, result.Token.Length)]}…");
-                break;
-            case ApprovalOutcome.Denied:
-                Log("[DENIED] User tapped Deny.");
-                break;
-            case ApprovalOutcome.TimedOut:
-                Log("[TIMEOUT] User did not respond within 60 seconds.");
-                break;
-            default:
-                Log($"[ERROR] {result.Error}");
-                Log($"[RAW] {result.RawResponse}");
-                break;
-        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
