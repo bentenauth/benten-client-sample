@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="!Exists('$(BentenSdkProject)')">
-    <PackageReference Include="Benten.SDK" Version="1.0.0" />
+    <PackageReference Include="Benten.SDK" Version="1.0.1" />
   </ItemGroup>
 
   <ItemGroup>
